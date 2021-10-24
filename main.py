@@ -16,13 +16,13 @@ s_door_1 = threading.Semaphore(1)
 s_door_2 = threading.Semaphore(1)
 
 #: Table A
-table_a = {'string': 'A', 'semaphore': threading.Semaphore(4), 'line': 0}
+table_a = {'string': 'A', 'semaphore': threading.Semaphore(), 'line': 0}
 
 #: Table B
-table_b = {'string': 'B', 'semaphore': threading.Semaphore(4), 'line': 0}
+table_b = {'string': 'B', 'semaphore': threading.Semaphore(), 'line': 0}
 
 #: Table C
-table_c = {'string': 'C', 'semaphore': threading.Semaphore(4), 'line': 0}
+table_c = {'string': 'C', 'semaphore': threading.Semaphore(), 'line': 0}
 
 
 def t_customer_code(id):
@@ -56,9 +56,23 @@ def t_customer_code(id):
             i['line'] -= 1
             table = i
             logging.info("T_Customer %s: sat at table %s", id, i['string'])
+            break
 
+    #: leave
     table['semaphore'].release()
     logging.info("T_Customer %s: left table %s", id, i['string'])
+
+    if id % 2 == 0:
+        s_door_1.acquire()
+        logging.info("T_Customer %s: left through door 1", id)
+        s_door_1.release()
+        sys.exit()
+
+    else:
+        s_door_2.acquire()
+        logging.info("T_Customer %s: left through door 2", id)
+        s_door_2.release()
+        sys.exit()
 
 
 #: customer thread spawner
