@@ -16,91 +16,16 @@ s_door_1 = threading.Semaphore(1)
 s_door_2 = threading.Semaphore(1)
 
 #: Table A
-s_table_a = threading.Semaphore(4)
-table_a_line = 0
+table_a = {'string': 'A', 'semaphore': threading.Semaphore(4), 'line': 0}
 
 #: Table B
-s_table_b = threading.Semaphore(4)
-table_b_line = 0
+table_b = {'string': 'B', 'semaphore': threading.Semaphore(4), 'line': 0}
 
 #: Table C
-s_table_c = threading.Semaphore(4)
-table_c_line = 0
+table_c = {'string': 'C', 'semaphore': threading.Semaphore(4), 'line': 0}
 
 
 def t_customer_code(id):
-    def pick_table(table_choices):
-        if table_choices[0] == 'A':
-            if table_a_line < 7:
-                s_table_a.acquire()
-                table_a_line += 1
-            else:
-                #: go to second choice
-                if table_choices[1] == 'B':
-                    if table_b_line < 7:
-                        s_table_b.acquire()
-                        table_b_line += 1
-                    else:
-                        #: go to last choice
-                        s_table_c.acquire()
-                        table_c_line += 1
-
-                else:  # : table_choices[1] == 'C'
-                    if table_c_line < 7:
-                        s_table_c.acquire()
-                        table_c_line += 1
-                    else:
-                        #: go to last choice
-                        s_table_b.acquire()
-                        table_b_line += 1
-
-        if table_choices[0] == 'B':
-            if table_b_line < 7:
-                s_table_b.acquire()
-                table_b_line += 1
-            else:
-                #: go to second choice
-                if table_choices[1] == 'A':
-                    if table_a_line < 7:
-                        s_table_a.acquire()
-                        table_a_line += 1
-                    else:
-                        #: go to last choice
-                        s_table_c.acquire()
-                        table_c_line += 1
-
-                else:  # : table_choices[1] == 'C'
-                    if table_c_line < 7:
-                        s_table_c.acquire()
-                        table_c_line += 1
-                    else:
-                        #: go to last choice
-                        s_table_a.acquire()
-                        table_a_line += 1
-
-        if table_choices[0] == 'C':
-            if table_c_line < 7:
-                s_table_c.acquire()
-                table_c_line += 1
-            else:
-                #: go to second choice
-                if table_choices[1] == 'A':
-                    if table_a_line < 7:
-                        s_table_a.acquire()
-                        table_a_line += 1
-                    else:
-                        #: go to last choice
-                        s_table_b.acquire()
-                        table_b_line += 1
-
-                else:  # : table_choices[1] == 'B'
-                    if table_b_line < 7:
-                        s_table_b.acquire()
-                        table_b_line += 1
-                    else:
-                        #: go to last choice
-                        s_table_a.acquire()
-                        table_a_line += 1
     #: customer enters door
     #: determine which door to try based on id odd / even
 
@@ -115,14 +40,25 @@ def t_customer_code(id):
         s_door_2.release()
 
     #: determine table choice order randomly
-    table_choices = ['A', 'B', 'C']
-    random.shuffle(tables)
+    table_choices = [table_a, table_b, table_c]
+    random.shuffle(table_choices)
 
-    logging.info("T_Customer %s: table order is %s, %s, %s", id,
-                 table_choices, table_choices, table_choices)
+    logging.info("T_Customer %s: table order is %s, %s, %s", id, table_choices[0].get(
+        'string'), table_choices[1].get('string'), table_choices[2].get('string'))
 
-    #: look for table
-    pick_table(table_choices)
+    #: sit down
+    table = None
+    for i in table_choices:
+        #: if the line is short enough or at the last table choice, sit
+        if i['line'] < 7 or table_choices.index(i) == len(table_choices):
+            i['line'] += 1
+            i['semaphore'].acquire()
+            i['line'] -= 1
+            table = i
+            logging.info("T_Customer %s: sat at table %s", id, i['string'])
+
+    table['semaphore'].release()
+    logging.info("T_Customer %s: left table %s", id, i['string'])
 
 
 #: customer thread spawner
