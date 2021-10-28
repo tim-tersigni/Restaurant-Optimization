@@ -10,7 +10,7 @@ import sys
 if __name__ == "__main__":
 
     format = "%(asctime)s: %(message)s"
-    logging.basicConfig(format=format, level=logging.DEBUG, datefmt="%H:%M:%S")
+    logging.basicConfig(format=format, level=logging.INFO, datefmt="%H:%M:%S")
 
 #: Door 1
 s_door_1 = threading.Semaphore(1)
@@ -33,44 +33,13 @@ s_payment = threading.Semaphore(1)
 #: Waiters
 s_waiters = threading.Semaphore(3)
 
-#: Waiter / customer pipeline
-
-
-# class Pipeline():
-#     def __init__(self, table):
-#         self.order = None
-#         self.l_set = threading.Lock()
-#         self.l_get = threading.Lock()
-#         self.l_get.acquire()
-
-#     def set_order(self, id):
-#         logging.debug("Pipeline: %s about to acquire setlock", id)
-#         self.l_set.acquire()
-#         logging.debug("Pipeline: %s has setlock", id)
-#         self.order = id
-#         logging.debug("Pipeline: %s about to release getlock", id)
-#         self.l_get.release()
-#         logging.debug("Pipeline: %s getlock released", id)
-
-#     def get_order(self, id):
-#         logging.debug("Pipeline: %s about to acquire getlock", id)
-#         self.l_get.acquire()
-#         logging.debug("Pipeline: %s: has getlock", id)
-#         order = self.order
-#         logging.debug("Pipeline: %s about to release setlock", id)
-#         self.l_set.release()
-#         logging.debug("Pipeline: %s setlock released", id)
-#         return order
-
-
-test = threading.Semaphore(0)
-
 #: Table A
 table_a = {'string': 'A',
            'semaphore': threading.Semaphore(4),
            'queue': Queue(4),
            'seated': 0,
            'line': 0,
+           'q_line': Queue(30),
            'food': 'seafood',
            'waiter': None}
 
@@ -80,6 +49,7 @@ table_b = {'string': 'B',
            'queue': Queue(4),
            'seated': 0,
            'line': 0,
+           'q_line': Queue(30),
            'food': 'steak',
            'waiter': None}
 
@@ -89,6 +59,7 @@ table_c = {'string': 'C',
            'queue': Queue(4),
            'seated': 0,
            'line': 0,
+           'q_line': Queue(30),
            'food': 'pasta',
            'waiter': None}
 
@@ -116,30 +87,40 @@ def t_customer(id):
     table_choices = [table_a, table_b, table_c]
     random.shuffle(table_choices)
 
-    logging.info("T_Customer %s: table order is %s, %s, %s", id, table_choices[0].get(
-        'string'), table_choices[1].get('string'), table_choices[2].get('string'))
+    table_choices = table_choices[0:2]
+    r = random.randint(0, 1)
+    if r == 0:
+        table_choices = table_choices[0:1]
+        logging.info("T_Customer %s: table choices are %s", id, table_choices[0].get('string'))
+    else:
+        logging.info("T_Customer %s: table choices are %s, %s", id, table_choices[0].get('string'), table_choices[1].get('string'))
 
-    #: sit down
+
+    #: pick table
     table = table_choices[0]
-    for i in table_choices:
-        #: if the line is short enough or at the last table choice, sit
-        if i['line'] < 7 or table_choices.index(i) == len(table_choices):
-            i['line'] += 1
-            i['semaphore'].acquire()
-            i['line'] -= 1
-            table = i
-            logging.info("T_Customer %s: sat at table %s", id, i['string'])
-            table['seated'] += 1
-            break
+    if len(table_choices) > 1:
+        if table['line'] > 7 and table_choices[1].get('line') < 7:
+            table = table_choices[1]
 
-    #: call waiter
-    table['queue'].put(id)
-    logging.info("T_Customer %s: placed order", id)
+    #: sit down if empty seat, otherwise enter line
+    if table['seated'] < 4:
+        #: sit
+        table['semaphore'].acquire()
+        table['seated'] += 1
+        
+        #: call waiter
+        table['queue'].put(id)
+        logging.info("T_Customer %s: placed order", id)
+        table['semaphore'].release()
+    else:
+        #: enter line
+        table['line'] += 1
+        table['q_line'].set(id)
+
 
 
 def t_customer_post(id, table):
     global customer_count
-    print('post started')
 
     #: eat food
     wait_time = random.randint(200, 1000) / 1000
@@ -154,6 +135,9 @@ def t_customer_post(id, table):
     s_payment.acquire()
     logging.info("T_Customer %s: paid their bill", id)
     s_payment.release()
+
+    #: leave table, allow next customer in line
+
 
     #: leave restaurant
     if id % 2 == 0:
@@ -171,9 +155,7 @@ def t_customer_post(id, table):
     logging.info("Main: customer count: %s", customer_count)
     if customer_count == 0:
         end.set()
-    s_customer_count.release()
-    print('end')
-    threading.join()
+    s_customer_count.release()    
 
 
 def t_waiter(id):
@@ -205,7 +187,7 @@ def t_waiter(id):
         logging.info("T_Waiter %s: chose table c", id)
     s_table_pick.release()
 
-    while end.isSet() == False:
+    while table['line'] > 0 or table['seated'] > 0:
         #: getting order HERE TODO
         order = table['queue'].get()
         table['queue'].task_done()
@@ -238,20 +220,8 @@ def t_waiter(id):
         c = threading.Thread(target=t_customer_post(order, table))
         c.start()
 
-    #: clean table and exit
-    logging.info("T_Waiter %s: cleaned table %s", id, table['string'])
-
-    if id % 2 == 0:
-        s_door_1.acquire()
-        logging.info("T_Waiter %s: left through door 1", id)
-        s_door_1.release()
-
-    else:
-        s_door_2.acquire()
-        logging.info("T_Waiter %s: left through door 2", id)
-        s_door_2.release()
-
-    sys.exit()
+        #: clean table
+        logging.info("T_Waiter %s: cleaned table %s", id, table['string'])
 
 
 end = threading.Event()
@@ -264,15 +234,24 @@ s_waiter_spawn.acquire()
 
 
 #: customer thread spawner
-# with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
-#     executor.map(t_customer, range(3))
-for i in range(0, 3):
+for i in range(0, 30):
     t = threading.Thread(target=t_customer(i,))
     t.start()
-
-print('done spawning customers...')
 
 #: waiter thread spawner
 for i in range(0, 3):
     t = threading.Thread(target=t_waiter(i,))
     t.start()
+
+#: waiters can leave
+for id in range(0, 3):
+
+    if id % 2 == 0:
+        s_door_1.acquire()
+        logging.info("T_Waiter %s: left through door 1", id)
+        s_door_1.release()
+
+    else:
+        s_door_2.acquire()
+        logging.info("T_Waiter %s: left through door 2", id)
+        s_door_2.release()
