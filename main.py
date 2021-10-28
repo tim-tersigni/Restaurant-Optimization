@@ -1,16 +1,12 @@
 import logging
 import threading
-import queue
 from queue import Queue
 import time
-import concurrent.futures
 import random
-import sys
 
-if __name__ == "__main__":
 
-    format = "%(asctime)s: %(message)s"
-    logging.basicConfig(format=format, level=logging.INFO, datefmt="%H:%M:%S")
+format = "%(asctime)s: %(message)s"
+logging.basicConfig(format=format, level=logging.INFO, datefmt="%H:%M:%S")
 
 #: Door 1
 s_door_1 = threading.Semaphore(1)
@@ -35,7 +31,7 @@ s_waiters = threading.Semaphore(3)
 
 #: Table A
 table_a = {'string': 'A',
-           'semaphore': threading.Semaphore(4),
+           'semaphore': threading.Semaphore(1),
            'queue': Queue(4),
            'seated': 0,
            'line': 0,
@@ -45,7 +41,7 @@ table_a = {'string': 'A',
 
 #: Table B
 table_b = {'string': 'B',
-           'semaphore': threading.Semaphore(4),
+           'semaphore': threading.Semaphore(1),
            'queue': Queue(4),
            'seated': 0,
            'line': 0,
@@ -55,7 +51,7 @@ table_b = {'string': 'B',
 
 #: Table C
 table_c = {'string': 'C',
-           'semaphore': threading.Semaphore(4),
+           'semaphore': threading.Semaphore(1),
            'queue': Queue(4),
            'seated': 0,
            'line': 0,
@@ -103,9 +99,9 @@ def t_customer(id):
             table = table_choices[1]
 
     #: sit down if empty seat, otherwise enter line
+    table['semaphore'].acquire()
     if table['seated'] < 4:
         #: sit
-        table['semaphore'].acquire()
         table['seated'] += 1
         
         #: call waiter
@@ -115,8 +111,8 @@ def t_customer(id):
     else:
         #: enter line
         table['line'] += 1
-        table['q_line'].set(id)
-
+        table['q_line'].put(id)
+    table['semaphore'].release()
 
 
 def t_customer_post(id, table):
@@ -136,7 +132,25 @@ def t_customer_post(id, table):
     logging.info("T_Customer %s: paid their bill", id)
     s_payment.release()
 
-    #: leave table, allow next customer in line
+    #: allow next customer in line
+    if table['line'] > 0:
+        table['semaphore'].acquire()
+        table['line'] -= 1
+        id = table['q_line'].get()
+        if table['seated'] < 4:
+        #: sit
+            table['seated'] += 1
+            
+            #: call waiter
+            table['queue'].put(id)
+            logging.info("T_Customer %s: placed order", id)
+            table['semaphore'].release()
+        else:
+            #: enter line
+            table['line'] += 1
+            table['q_line'].put(id)
+        table['semaphore'].release()
+    
 
 
     #: leave restaurant
@@ -159,17 +173,6 @@ def t_customer_post(id, table):
 
 
 def t_waiter(id):
-    #: waiter enters door
-    #: determine which door to try based on id odd / even
-    if id % 2 == 0:
-        s_door_1.acquire()
-        logging.info("T_Waiter %s: entered door 1", id)
-        s_door_1.release()
-
-    else:
-        s_door_2.acquire()
-        logging.info("T_Waiter %s: entered door 2", id)
-        s_door_2.release()
 
     #: choose table
     s_table_pick.acquire()
@@ -220,18 +223,22 @@ def t_waiter(id):
         c = threading.Thread(target=t_customer_post(order, table))
         c.start()
 
-        #: clean table
-        logging.info("T_Waiter %s: cleaned table %s", id, table['string'])
 
 
 end = threading.Event()
 
+#: waiters enter
+#: determine which door to try based on id odd / even
+for id in range(0, 3):
+    if id % 2 == 0:
+        s_door_1.acquire()
+        logging.info("T_Waiter %s: entered door 1", id)
+        s_door_1.release()
 
-s_waiter_spawn = threading.Semaphore(3)
-s_waiter_spawn.acquire()
-s_waiter_spawn.acquire()
-s_waiter_spawn.acquire()
-
+    else:
+        s_door_2.acquire()
+        logging.info("T_Waiter %s: entered door 2", id)
+        s_door_2.release()
 
 #: customer thread spawner
 for i in range(0, 30):
@@ -244,6 +251,10 @@ for i in range(0, 3):
     t.start()
 
 #: waiters can leave
+logging.info("T_Waiter %s: cleaned table a", table_a['waiter'])
+logging.info("T_Waiter %s: cleaned table b", table_b['waiter'])
+logging.info("T_Waiter %s: cleaned table c", table_c['waiter'])
+
 for id in range(0, 3):
 
     if id % 2 == 0:
