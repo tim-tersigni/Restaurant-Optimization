@@ -4,7 +4,6 @@ from queue import Queue
 import time
 import random
 
-
 format = "%(asctime)s: %(message)s"
 logging.basicConfig(format=format, level=logging.INFO, datefmt="%H:%M:%S")
 
@@ -103,6 +102,7 @@ def t_customer(id):
     if table['seated'] < 4:
         #: sit
         table['seated'] += 1
+        # logging.info("T_Customer %s: sat down at table %s", id, table['string'])
         
         #: call waiter
         table['queue'].put(id)
@@ -112,6 +112,7 @@ def t_customer(id):
         #: enter line
         table['line'] += 1
         table['q_line'].put(id)
+        logging.info("T_Customer %s: entered line for table %s", id, table['string'])
     table['semaphore'].release()
 
 
@@ -119,6 +120,7 @@ def t_customer_post(id, table):
     global customer_count
 
     #: eat food
+    logging.info("T_Customer %s: is eating their food", id)
     wait_time = random.randint(200, 1000) / 1000
     time.sleep(wait_time)
 
@@ -139,6 +141,7 @@ def t_customer_post(id, table):
         id = table['q_line'].get()
         if table['seated'] < 4:
         #: sit
+            logging.info("T_Customer %s: sat down at table %s", id, table['string'])
             table['seated'] += 1
             
             #: call waiter
@@ -192,7 +195,7 @@ def t_waiter(id):
 
     while table['line'] > 0 or table['seated'] > 0:
         #: getting order HERE TODO
-        order = table['queue'].get()
+        order = int(table['queue'].get())
         table['queue'].task_done()
         logging.debug("T_Waiter %s: got order %s", id, order)
 
