@@ -36,31 +36,31 @@ s_waiters = threading.Semaphore(3)
 #: Waiter / customer pipeline
 
 
-class Pipeline():
-    def __init__(self, table):
-        self.order = None
-        self.l_set = threading.Lock()
-        self.l_get = threading.Lock()
-        self.l_get.acquire()
+# class Pipeline():
+#     def __init__(self, table):
+#         self.order = None
+#         self.l_set = threading.Lock()
+#         self.l_get = threading.Lock()
+#         self.l_get.acquire()
 
-    def set_order(self, id):
-        logging.debug("Pipeline: %s about to acquire setlock", id)
-        self.l_set.acquire()
-        logging.debug("Pipeline: %s has setlock", id)
-        self.order = id
-        logging.debug("Pipeline: %s about to release getlock", id)
-        self.l_get.release()
-        logging.debug("Pipeline: %s getlock released", id)
+#     def set_order(self, id):
+#         logging.debug("Pipeline: %s about to acquire setlock", id)
+#         self.l_set.acquire()
+#         logging.debug("Pipeline: %s has setlock", id)
+#         self.order = id
+#         logging.debug("Pipeline: %s about to release getlock", id)
+#         self.l_get.release()
+#         logging.debug("Pipeline: %s getlock released", id)
 
-    def get_order(self, id):
-        logging.debug("Pipeline: %s about to acquire getlock", id)
-        self.l_get.acquire()
-        logging.debug("Pipeline: %s: has getlock", id)
-        order = self.order
-        logging.debug("Pipeline: %s about to release setlock", id)
-        self.l_set.release()
-        logging.debug("Pipeline: %s setlock released", id)
-        return order
+#     def get_order(self, id):
+#         logging.debug("Pipeline: %s about to acquire getlock", id)
+#         self.l_get.acquire()
+#         logging.debug("Pipeline: %s: has getlock", id)
+#         order = self.order
+#         logging.debug("Pipeline: %s about to release setlock", id)
+#         self.l_set.release()
+#         logging.debug("Pipeline: %s setlock released", id)
+#         return order
 
 
 test = threading.Semaphore(0)
@@ -68,9 +68,7 @@ test = threading.Semaphore(0)
 #: Table A
 table_a = {'string': 'A',
            'semaphore': threading.Semaphore(4),
-           's_customer': threading.Semaphore(0),
-           's_waiter': threading.Semaphore(0),
-           'pipeline': Pipeline('A'),
+           'queue': Queue(4),
            'seated': 0,
            'line': 0,
            'food': 'seafood',
@@ -79,9 +77,7 @@ table_a = {'string': 'A',
 #: Table B
 table_b = {'string': 'B',
            'semaphore': threading.Semaphore(4),
-           's_customer': threading.Semaphore(0),
-           's_waiter': threading.Semaphore(0),
-           'pipeline': Pipeline('B'),
+           'queue': Queue(4),
            'seated': 0,
            'line': 0,
            'food': 'steak',
@@ -90,9 +86,7 @@ table_b = {'string': 'B',
 #: Table C
 table_c = {'string': 'C',
            'semaphore': threading.Semaphore(4),
-           's_customer': threading.Semaphore(0),
-           's_waiter': threading.Semaphore(0),
-           'pipeline': Pipeline('C'),
+           'queue': Queue(4),
            'seated': 0,
            'line': 0,
            'food': 'pasta',
@@ -139,13 +133,13 @@ def t_customer(id):
             break
 
     #: call waiter
-    table['pipeline'].set_order(id)
-    # table['s_customer'].acquire()
-    test.acquire()
+    table['queue'].put(id)
+    logging.info("T_Customer %s: placed order", id)
 
-    #: wait on food
-    table['s_waiter'].release()
-    table['s_customer'].acquire()
+
+def t_customer_post(id, table):
+    global customer_count
+    print('post started')
 
     #: eat food
     wait_time = random.randint(200, 1000) / 1000
@@ -153,7 +147,7 @@ def t_customer(id):
 
     #: leave
     table['semaphore'].release()
-    logging.info("T_Customer %s: left table %s", id, i['string'])
+    logging.info("T_Customer %s: left table %s", id, table['string'])
     table['seated'] -= 1
 
     #: pay bill
@@ -178,12 +172,11 @@ def t_customer(id):
     if customer_count == 0:
         end.set()
     s_customer_count.release()
-
-    sys.exit()
+    print('end')
+    threading.join()
 
 
 def t_waiter(id):
-
     #: waiter enters door
     #: determine which door to try based on id odd / even
     if id % 2 == 0:
@@ -212,13 +205,11 @@ def t_waiter(id):
         logging.info("T_Waiter %s: chose table c", id)
     s_table_pick.release()
 
-    table['s_waiter'].acquire()
-
     while end.isSet() == False:
-        table['s_waiter'].acquire()
-
-        order = table['pipeline'].get_order(id)
-        logging.info("T_Waiter %s: took customer %s's order", id, order)
+        #: getting order HERE TODO
+        order = table['queue'].get()
+        table['queue'].task_done()
+        logging.debug("T_Waiter %s: got order %s", id, order)
 
         #: deliver order
         s_kitchen.acquire()
@@ -240,12 +231,12 @@ def t_waiter(id):
             "T_Waiter %s: received order %s from the kitchen", id, order)
         s_kitchen.release()
 
-        #: deliver order
+        #: deliver order TODO
         logging.info(
             "T_Waiter %s: delivered customer %s's order", id, order)
 
-        table['s_waiter'].release()
-        table['s_customer'].release()
+        c = threading.Thread(target=t_customer_post(order, table))
+        c.start()
 
     #: clean table and exit
     logging.info("T_Waiter %s: cleaned table %s", id, table['string'])
@@ -279,8 +270,7 @@ for i in range(0, 3):
     t = threading.Thread(target=t_customer(i,))
     t.start()
 
-
-print('hello')
+print('done spawning customers...')
 
 #: waiter thread spawner
 for i in range(0, 3):
